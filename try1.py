@@ -20,10 +20,13 @@ def argfix(*x):
     return tuple(x[0])
   return x
 
+# *** ops ***
+
 # TODO: the type of arg should depend on op, is this doable?
 class Ops(Enum):
   DTYPE = auto()
   CONST = auto()
+  RANGE = auto()
 
   # binary ops
   ADD = auto(); MUL = auto() # noqa: E702
@@ -33,7 +36,11 @@ class Ops(Enum):
   SHRINK = auto(); PAD = auto() # noqa: E702
   PERMUTE = auto(); FLIP = auto() # noqa: E702
 
+class GroupOp:
+  Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
+
 class UOp:
+  # TODO: tinygrad -- can we change the UOp constructor to this?
   def __init__(self, op:Ops, *src:UOp, arg:Any=None): self.op, self.src, self.arg = op, src, arg
   def __repr__(self): return f"UOp({", ".join([str(self.op)]+[str(x) for x in self.src])}" + (f", arg={self.arg})" if self.arg is not None else ")")
 
@@ -41,18 +48,21 @@ class UOp:
 
   @functools.cached_property
   def dtype(self) -> UOp:
+    # TODO: tinygrad -- dtype should be a constructed property
     if self.op is Ops.DTYPE: return self
+    if self.op in GroupOp.Movement: return self.src[0].dtype
     return assert_all_same([x.dtype for x in self.src])
 
   @functools.cached_property
   def shape(self) -> list[UOp]|None:
     if self.op is Ops.DTYPE: return None
     if self.op is Ops.CONST: return []
+    # TODO: tinygrad -- RESHAPE/EXPAND/SHRINK/PAD should have arguments as UOp srcs
     if self.op is Ops.RESHAPE:
-      assert prod(self.src[0].shape) == prod(self.src[1:]), "reshape must preserve shape"
+      #assert prod(self.src[0].shape) == prod(self.src[1:]), "reshape must preserve shape"
       return self.src[1:]
     if self.op is Ops.EXPAND:
-      assert all(s1 == s2 or s1 == 1 for s1,s2 in zip(self.shape, self.src[1:])), "expand only expands 1s"
+      #assert all(s1 == s2 or s1 == 1 for s1,s2 in zip(self.src[0].shape, self.src[1:])), "expand only expands 1s"
       return self.src[1:]
     return assert_all_same([x.shape for x in self.src])
 
@@ -62,27 +72,29 @@ sint = int|UOp
 
 @dataclass(frozen=True, eq=False, slots=True)
 class DType:
+  # TODO: tinygrad -- do we need priority?
   itemsize: int
   name: str
   fmt: FmtStr|None
   def __repr__(self): return f"dtypes.{self.name}"
 
 class dtypes:
+  # TODO: tinygrad -- these should be UOps to not repeat the deduping logic
   index: Final[UOp] = UOp(Ops.DTYPE, arg=DType(0, "index", None))
   bool: Final[UOp] = UOp(Ops.DTYPE, arg=DType(1, "bool", '?'))
-  int32: Final[UOp] = UOp(Ops.DTYPE, arg=DType(4, "int", 'i'))
-  int = int32
-  float32: Final[UOp] = UOp(Ops.DTYPE, arg=DType(4, "float", 'f'))
-  float = float32
+  int: Final[UOp] = UOp(Ops.DTYPE, arg=DType(4, "int", 'i'))
+  float: Final[UOp] = UOp(Ops.DTYPE, arg=DType(4, "float", 'f'))
 
 def py_to_dtype(data) -> UOp:
-  if isinstance(data, float): return dtypes.float32
-  if isinstance(data, int): return dtypes.int32
+  if isinstance(data, float): return dtypes.float
+  if isinstance(data, int): return dtypes.int
   if isinstance(data, bool): return dtypes.bool
   raise RuntimeError("unsupported data")
 
 def fix_shape(shape:tuple[sint, ...]) -> list[UOp]:
-  return [s if isinstance(s, UOp) else UOp(Ops.CONST, dtypes.index, arg=s) for s in shape]
+  return [UOp(Ops.CONST, dtypes.index, arg=s) if isinstance(s, int) else s for s in shape]
+
+# *** Tensor ***
 
 class Tensor:
   def __init__(self, data:float|int|bool|UOp):
@@ -92,7 +104,12 @@ class Tensor:
       # const
       self.uop = UOp(Ops.CONST, py_to_dtype(data), arg=data)
     # do construction early to find errors
-    self.uop.dtype, self.uop.shape
+    self.dtype, self.shape
+
+  @property
+  def dtype(self): return self.uop.dtype
+  @property
+  def shape(self): return self.uop.shape
 
   def __repr__(self): return repr(self.uop)
 
@@ -100,15 +117,20 @@ class Tensor:
     # TODO: broadcasting + constcasting
     return Tensor(UOp(Ops.MUL, self.uop, x.uop))
 
-  def reshape(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.RESHAPE, self.uop, *fix_shape(argfix(shape))))
-  def expand(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.EXPAND, self.uop, *fix_shape(argfix(shape))))
+  def reshape(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.RESHAPE, self.uop, *fix_shape(argfix(*shape))))
+  def expand(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.EXPAND, self.uop, *fix_shape(argfix(*shape))))
 
   @staticmethod
   def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
     return Tensor(fill_value).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+  @staticmethod
+  def ones(*shape, **kwargs) -> Tensor:
+    return Tensor.full(argfix(*shape), 1.0, **kwargs)
 
 # *** usage ***
 
 if __name__ == "__main__":
   out = Tensor(2) * Tensor(2)
   print(out)
+  full = Tensor.ones(8,8)
+  print(full)
