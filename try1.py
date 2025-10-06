@@ -22,14 +22,31 @@ def argfix(*x):
 
 # *** ops ***
 
+# TODO: should this include MULTI? probably
+class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
+
 # TODO: the type of arg should depend on op, is this doable?
 class Ops(Enum):
+  # hmm, i don't like DTYPE as an Op. it has similar vibes to DEVICE
   DTYPE = auto()
+  DEVICE = auto()
+
+  # a CONST has a value, a DTYPE, and an optional DEVICE
   CONST = auto()
+  BUFFER = auto() # <-- all types?
+
   RANGE = auto()
+
+  # unary ops
+  CAST = auto()
 
   # binary ops
   ADD = auto(); MUL = auto() # noqa: E702
+
+  # reduce axis -> reduce -> store+load
+  REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
+
+  STORE = auto(); LOAD = auto()
 
   # movement ops!
   RESHAPE = auto(); EXPAND = auto() # noqa: E702
