@@ -1,6 +1,6 @@
 from __future__ import annotations
 import functools, operator, weakref
-from typing import Any, Literal, Final, Iterable, TypeVar
+from typing import Any, Literal, Final, Iterable, TypeVar, Sequence
 from enum import auto, Enum
 from dataclasses import dataclass
 
@@ -19,6 +19,7 @@ def argfix(*x):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
     return tuple(x[0])
   return x
+def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 
 # *** ops ***
 
@@ -99,6 +100,10 @@ class UOp(metaclass=UOpMetaClass):
       return self.src[1:]
     return assert_all_same([x.shape for x in self.src])
 
+def smax(*lst):
+  # TODO: write this
+  return sorted(argfix(*lst), key=lambda x: x.arg)[-1]
+
 # *** high level ***
 
 sint = int|UOp
@@ -127,6 +132,15 @@ def py_to_dtype(data) -> UOp:
 def fix_shape(shape:tuple[sint, ...]) -> list[UOp]:
   return [UOp(Ops.CONST, dtypes.index, arg=s) if isinstance(s, int) else s for s in shape]
 
+# *** Tensor helpers ***
+
+def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
+  # unsqueeze left to make every shape same length
+  max_dim = max(len(shape) for shape in shapes)
+  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
+def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
+  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
+
 # *** Tensor ***
 
 class Tensor:
@@ -154,8 +168,9 @@ class Tensor:
   def __repr__(self): return repr(self.uop)
 
   def __mul__(self, x:Tensor) -> Tensor:
+    out_shape = _broadcast_shape(self.shape, x.shape)
     # TODO: broadcasting + constcasting
-    return Tensor(UOp(Ops.MUL, self.uop, x.uop))
+    return Tensor(UOp(Ops.MUL, self.expand(out_shape).uop, x.expand(out_shape).uop))
 
   def reshape(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.RESHAPE, self.uop, *fix_shape(argfix(*shape))))
   def expand(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.EXPAND, self.uop, *fix_shape(argfix(*shape))))
@@ -175,6 +190,15 @@ class Tensor:
   @staticmethod
   def ones(*shape, **kwargs) -> Tensor:
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
+
+  def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
+    axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
+    if self.ndim == 0: axis = ()
+    ret = Tensor(UOp(Ops.REDUCE_AXIS, self.uop, arg=axis))
+    return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
+
+  def sum(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
+    return self._reduce(Ops.ADD, axis, keepdim)
 
   def __matmul__(self, w:Tensor) -> Tensor:
     x, dx, dw = self, self.ndim, w.ndim
