@@ -29,8 +29,7 @@ class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E7
 # TODO: the type of arg should depend on op, is this doable?
 class Ops(Enum):
   # hmm, i don't like DTYPE as an Op. it has similar vibes to DEVICE
-  DTYPE = auto()
-  DEVICE = auto()
+  DTYPE = auto(); DEVICE = auto() # noqa: E702
 
   # a CONST has a value, a DTYPE, and an optional DEVICE
   CONST = auto()
@@ -131,6 +130,10 @@ def py_to_dtype(data) -> UOp:
 
 def fix_shape(shape:tuple[sint, ...]) -> list[UOp]:
   return [UOp(Ops.CONST, dtypes.index, arg=s) if isinstance(s, int) else s for s in shape]
+
+# *** matcher ***
+
+# TODO: can UPat be UOp?
 
 # *** Tensor helpers ***
 
