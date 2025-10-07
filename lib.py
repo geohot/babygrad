@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, operator
+import functools, operator, weakref
 from typing import Any, Literal, Final, Iterable, TypeVar
 from enum import auto, Enum
 from dataclasses import dataclass
@@ -56,7 +56,14 @@ class Ops(Enum):
 class GroupOp:
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-class UOp:
+class UOpMetaClass(type):
+  ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
+  def __call__(cls, op:Ops, *src:UOp, arg:Any=None):
+    if (wret:=UOpMetaClass.ucache.get(key:=(op, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
+    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, *src, arg=arg))
+    return created
+
+class UOp(metaclass=UOpMetaClass):
   # TODO: tinygrad -- can we change the UOp constructor to this?
   def __init__(self, op:Ops, *src:UOp, arg:Any=None): self.op, self.src, self.arg = op, src, arg
   def __repr__(self): return f"UOp({", ".join([str(self.op)]+[str(x) for x in self.src])}" + (f", arg={self.arg})" if self.arg is not None else ")")
