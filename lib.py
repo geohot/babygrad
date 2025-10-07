@@ -194,7 +194,8 @@ class Tensor:
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
-    ret = Tensor(UOp(Ops.REDUCE_AXIS, self.uop, arg=axis))
+    # TODO: change this in tinygrad, keepdim should not be the default
+    ret = Tensor(UOp(Ops.REDUCE_AXIS, self.uop, arg=(op, axis)))
     return ret if keepdim else ret.reshape(tuple(s for i,s in enumerate(self.shape) if i not in axis))
 
   def sum(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
