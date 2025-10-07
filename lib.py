@@ -143,11 +143,3 @@ class Tensor:
   @staticmethod
   def ones(*shape, **kwargs) -> Tensor:
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
-
-# *** usage ***
-
-if __name__ == "__main__":
-  out = Tensor(2) * Tensor(2)
-  print(out)
-  full = Tensor.ones(8,8)
-  print(full)
