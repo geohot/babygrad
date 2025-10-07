@@ -38,10 +38,16 @@ class Ops(Enum):
   RANGE = auto()
 
   # unary ops
-  CAST = auto()
+  CAST = auto(); BITCAST = auto() # noqa: E702
+  EXP2 = auto(); LOG2 = auto(); SIN = auto() # noqa: E702
+  SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto() # noqa: E702
 
-  # binary ops
-  ADD = auto(); MUL = auto() # noqa: E702
+  # BinaryOps
+  ADD = auto(); MUL = auto(); POW = auto(); IDIV = auto(); MAX = auto() # noqa: E702
+  CMPLT = auto(); CMPNE = auto() # noqa: E702
+
+  # TernaryOps
+  WHERE = auto()
 
   # reduce axis -> reduce -> store+load
   REDUCE_AXIS = auto(); REDUCE = auto() # noqa: E702
@@ -54,9 +60,12 @@ class Ops(Enum):
   PERMUTE = auto(); FLIP = auto() # noqa: E702
 
 class GroupOp:
+  Unary = {Ops.CAST, Ops.BITCAST, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
+  Binary = {Ops.ADD, Ops.MUL, Ops.POW, Ops.IDIV, Ops.MAX, Ops.CMPLT, Ops.CMPNE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
 class UOpMetaClass(type):
+  # dedup all UOps
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, *src:UOp, arg:Any=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, src, arg), None)) is not None and (ret:=wret()) is not None: return ret
@@ -134,6 +143,13 @@ class Tensor:
   def dtype(self): return self.uop.dtype
   @property
   def shape(self): return self.uop.shape
+  @property
+  def ndim(self): return len(self.shape)
+
+  def _resolve_dim(self, dim:int) -> int:
+    total = self.ndim
+    if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
+    return dim + total if dim < 0 else dim
 
   def __repr__(self): return repr(self.uop)
 
@@ -143,6 +159,15 @@ class Tensor:
 
   def reshape(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.RESHAPE, self.uop, *fix_shape(argfix(*shape))))
   def expand(self, *shape:sint) -> Tensor: return Tensor(UOp(Ops.EXPAND, self.uop, *fix_shape(argfix(*shape))))
+  def permute(self, order:tuple[int, ...]) -> Tensor:
+    order_arg = tuple(self._resolve_dim(x) for x in argfix(order))
+    if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
+    return Tensor(UOp(Ops.PERMUTE, self.uop, arg=order_arg))
+
+  def transpose(self, dim0=1, dim1=0) -> Tensor:
+    order = list(range(self.ndim))
+    order[dim0], order[dim1] = order[dim1], order[dim0]
+    return self.permute(order)
 
   @staticmethod
   def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
@@ -150,3 +175,11 @@ class Tensor:
   @staticmethod
   def ones(*shape, **kwargs) -> Tensor:
     return Tensor.full(argfix(*shape), 1.0, **kwargs)
+
+  def __matmul__(self, w:Tensor) -> Tensor:
+    x, dx, dw = self, self.ndim, w.ndim
+    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
+    if x.shape[-1] != w.shape[(axis_w:=-min(w.ndim,2))]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
+    x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
+    w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
+    return (x*w).sum(-1)

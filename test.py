@@ -16,5 +16,11 @@ class TestTensor(unittest.TestCase):
     full = Tensor.ones(8,8)
     print(full)
 
+  def test_gemm(self):
+    t1 = Tensor.ones(8,8)
+    t2 = Tensor.ones(8,8)
+    out = t1 @ t2
+    print(out)
+
 if __name__ == "__main__":
   unittest.main()
